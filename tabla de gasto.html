@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3b82f6">
+
+<title>Control de Gastos PRO+</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{font-family:Arial;background:#eef2f7;padding:20px}
+.container{max-width:1000px;margin:auto}
+
+.titulo{
+    background:linear-gradient(90deg,#ff4fb3,#b94bff);
+    color:white;
+    text-align:center;
+    padding:15px;
+    font-weight:bold;
+    border-radius:8px;
+}
+
+.resumen{margin-top:15px;font-size:22px;font-weight:bold}
+
+.form{
+    display:grid;
+    grid-template-columns:150px 1fr;
+    gap:8px;
+    margin-top:20px;
+}
+
+.form label{
+    background:#22c55e;
+    color:white;
+    padding:10px;
+    font-weight:bold;
+}
+
+input,select{padding:10px}
+
+.btn{
+    background:#3b82f6;
+    color:white;
+    border:none;
+    padding:12px 18px;
+    border-radius:10px;
+    cursor:pointer;
+}
+
+.btn-eliminar{
+    background:red;
+    color:white;
+    border:none;
+    padding:6px 10px;
+    border-radius:6px;
+    cursor:pointer;
+    margin-top:5px;
+}
+
+.btn-editar{
+    background:#f59e0b;
+    color:white;
+    border:none;
+    padding:6px 10px;
+    border-radius:6px;
+    cursor:pointer;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:20px;
+}
+
+th{
+    background:#0f172a;
+    color:white;
+    padding:10px;
+}
+
+td{padding:10px;text-align:center}
+
+.total{
+    margin-top:15px;
+    font-size:20px;
+    font-weight:bold;
+    text-align:right;
+}
+
+.filtros{
+    margin-top:20px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+canvas{margin-top:20px;background:white;padding:15px;border-radius:10px}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="titulo">CONTROL DE GASTOS PRO+</div>
+
+<div class="resumen">
+TOTAL MES ACTUAL: $ <span id="totalMes">0.00</span>
+</div>
+
+<div class="form">
+<label>Fecha</label>
+<input type="date" id="fecha">
+
+<label>Concepto</label>
+<input type="text" id="concepto">
+
+<label>Categoría</label>
+<select id="categoria">
+<option>Servicios</option>
+<option>Transporte</option>
+<option>Suscripciones</option>
+<option>Otros</option>
+</select>
+
+<label>Importe</label>
+<input type="number" id="importe">
+</div>
+
+<div class="filtros">
+<input type="month" id="filtroMes">
+<button class="btn" onclick="filtrar()">FILTRAR MES</button>
+<button class="btn" onclick="exportar()">EXPORTAR EXCEL</button>
+<button class="btn" id="installBtn" style="display:none">INSTALAR APP</button>
+<button class="btn" onclick="window.open('https://www.pwabuilder.com')">CREAR APK (PWABuilder)</button>
+</div>
+
+<div style="margin-top:15px;">
+    <button class="btn" onclick="registrar()">REGISTRAR</button>
+</div>
+
+<canvas id="grafica"></canvas>
+
+<table>
+<thead>
+<tr>
+<th>Fecha</th>
+<th>Concepto</th>
+<th>Categoría</th>
+<th>Importe</th>
+<th>Acciones</th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table>
+
+<div class="total">TOTAL GENERAL: $ <span id="total">0.00</span></div>
+
+</div>
+
+<script>
+
+let gastos = JSON.parse(localStorage.getItem("gastos")) || [];
+let editIndex = null;
+let chart;
+let deferredPrompt;
+
+window.addEventListener('beforeinstallprompt', e=>{
+    e.preventDefault();
+    deferredPrompt=e;
+    installBtn.style.display='inline-block';
+});
+
+installBtn.onclick=()=>{
+    deferredPrompt.prompt();
+};
+
+function guardar(){
+    localStorage.setItem("gastos", JSON.stringify(gastos));
+}
+
+function totalMesActual(){
+    let mes = new Date().toISOString().slice(0,7);
+    let total = gastos
+        .filter(g=>g.fecha.startsWith(mes))
+        .reduce((a,b)=>a+parseFloat(b.importe),0);
+
+    totalMes.innerText = total.toFixed(2);
+}
+
+function actualizarGrafica(){
+    let categorias={};
+    gastos.forEach(g=>{
+        categorias[g.categoria]=(categorias[g.categoria]||0)+parseFloat(g.importe);
+    });
+
+    let labels=Object.keys(categorias);
+    let data=Object.values(categorias);
+
+    if(chart) chart.destroy();
+
+    chart=new Chart(grafica,{
+        type:'pie',
+        data:{labels:labels,datasets:[{data:data}]}
+    });
+}
+
+function mostrar(lista=gastos){
+    let html="";
+    let total=0;
+
+    lista.forEach((g,i)=>{
+        total += parseFloat(g.importe);
+
+        html+=`
+        <tr>
+            <td>${g.fecha}</td>
+            <td>${g.concepto}</td>
+            <td>${g.categoria}</td>
+            <td>$ ${parseFloat(g.importe).toFixed(2)}</td>
+            <td>
+                <button class="btn-editar" onclick="editar(${i})">Editar</button><br>
+                <button class="btn-eliminar" onclick="eliminar(${i})">X</button>
+            </td>
+        </tr>`;
+    });
+
+    tbody.innerHTML=html;
+    totalSpan.innerText=total.toFixed(2);
+    totalMesActual();
+    actualizarGrafica();
+}
+
+function registrar(){
+    let g={
+        fecha:fecha.value,
+        concepto:concepto.value,
+        categoria:categoria.value,
+        importe:importe.value
+    };
+
+    if(editIndex===null){
+        gastos.push(g);
+    }else{
+        gastos[editIndex]=g;
+        editIndex=null;
+    }
+
+    guardar();
+    mostrar();
+}
+
+function editar(i){
+    let g=gastos[i];
+    fecha.value=g.fecha;
+    concepto.value=g.concepto;
+    categoria.value=g.categoria;
+    importe.value=g.importe;
+    editIndex=i;
+}
+
+function eliminar(i){
+    if(confirm("¿Eliminar este gasto?")){
+        gastos.splice(i,1);
+        guardar();
+        mostrar();
+    }
+}
+
+function filtrar(){
+    let mes=filtroMes.value;
+    if(!mes){mostrar();return;}
+    let lista=gastos.filter(g=>g.fecha.startsWith(mes));
+    mostrar(lista);
+}
+
+function exportar(){
+    let csv="Fecha,Concepto,Categoria,Importe\n";
+    gastos.forEach(g=>{
+        csv+=`${g.fecha},${g.concepto},${g.categoria},${g.importe}\n`;
+    });
+
+    let blob=new Blob([csv],{type:"text/csv"});
+    let a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="gastos.csv";
+    a.click();
+}
+
+let tbody=document.getElementById("tbody");
+let totalSpan=document.getElementById("total");
+let totalMes=document.getElementById("totalMes");
+let grafica=document.getElementById("grafica");
+
+mostrar();
+
+/* REGISTRAR SERVICE WORKER */
+if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('service-worker.js');
+}
+
+</script>
+
+</body>
+</html>
